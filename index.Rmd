@@ -1,29 +1,74 @@
 ---
-title: "Regression"
+title: "G0I Regression: Bias-corrected estimation for the GI0 regression"
 output: html_document
 date: "2024-10-21"
 ---
 
-```{r setup, include=FALSE}
+### Packages
+```{r setup, include=TRUE, message=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+library(maxLik)  
+library(invgamma)
+library(knitr)
 ```
 
-## Primeiro Projeto de hoje
-
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
-```{r cars}
-summary(cars)
+### Random Number Generation of distribution
+```{r pressure, echo=TRUE}
+G0I.RNG <- function(n, theta)
+  rgamma(n, theta[3], theta[3]) * rinvgamma(n, -theta[1], rate = theta[2])
 ```
 
-## Including Plots
+### Random Number Generation of Regression Model
+```{r}
+G0I.Reg <- function(n, X, Z, theta, L){
+  # n, sample size
+  # X, independent variables
+  # Z, dependent variable
+  # L, number of looks
 
-You can also embed plots, for example:
+# Auxiliares
+p <- dim(X)[2]
+r <- length(theta)  
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+Beta  <- theta[1:p]
+Delta <- theta[(p+1):r]
+
+Mu  <- exp(X%*%Beta)
+Phi <- exp(Z%*%Delta)
+  
+ vet <- NULL
+ for(i in 1:n)
+    vet[i] <- G0I.RNG(1, c(-(Phi[i] + 2), (Phi[i] + 1)*Mu[i], L))
+  vet
+}
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+### Simulated data
+```{r}
+DataSim <- function(Size, theta){
+
+  if (theta[5] < 0) stop("L is the number of looks, positive integer")
+
+# Variables
+X   <- cbind(rep(1, n=Size), runif(n=Size))
+Z   <- cbind(rep(1, n=Size), runif(n=Size))
+
+# Simulated data
+Data  <- data.frame(y=G0I.Reg(n = Size, X=X, Z=Z, 
+                    theta = theta[1:4], L=theta[5]), X = X, Z = Z)
+colnames(Data) <- c("y", "x1", "x2", "z1", "z2")
+
+return(Data)
+}
+```
+
+### Simulated data
+```{r}
+set.seed(240701) # specify seeds
+
+theta <- c(Beta0=1.0, Beta1=1.0, Delta0=2.0, Delta1=4.0, L=4)
+Data <- DataSim(Size=10, theta=theta)
+kable(head(Data), align = "c")
+```
+
+
