@@ -1,0 +1,721 @@
+---
+title: <img src="https://www.ncti.com.br/wp-content/uploads/2014/02/UFPE.png" alt="Imagem 1" align="left" width="210"/>  <span style="color:blue"> Corrected Bias in $\mathcal{G}^0_I$ Regression </span> <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ0A7Hmh9LpEIOKNwwDUNf1saowzWf07lxQ_1rEJYn0CphxKpfLfyldkqZGEVgZu6-bOzQ&usqp=CAU" alt="Imagem 2" align="right" width="130"/>
+author: '**Authors**: M. Sousa <br/>                  $~~~~~~~~~~~~~~$ A. Nascimento <br/> 
+     $~~~~~~~~~~~~~~$ J. Vasconcelos <br/> 
+         **Correspondence Email**: josimar.vasconcelos@ufrpe.br'
+date: "Update date: 2024-10-11"
+header-includes:
+- \usepackage{amsthm, amssymb}
+- \usepackage{color, xcolor}
+output:
+  html_document:
+    toc: yes
+    number_sections: yes
+fig_caption: yes
+---
+
+
+<br/><br/>
+
+
+## Introduction
+
+
+<br/>
+<div style='text-align: justify;'>
+This post describes the numerical analysis of artificial data with aims to quantify the performance of the $\mathcal{R}\mathcal{G}^0_{I}$ model, as given in the paper:
+
+**M. F. S. S. Sousa, J. M. Vasconcelos and A. D. C.
+Nascimento, 20XX. Bias-corrected estimation for $\mathcal{G}^0_{I}$ regression with applications. Vol. XX. XXXXXXXXXXXXXXXXXXXXXXX.**
+
+In this post, we designed a simulation study to quantify the performance of the proposed improved estimator for the $\mathcal{R}\mathcal{G}^0_{I}$ model.
+Thus, we consider a Monte Carlo experiment with $1000$ repetitions.
+The data is generated from the model
+$\mathcal{G}_{I}^{0}\left(\alpha, \exp(\beta_{0}+\beta_ {1}\,x), \mathcal{L}\right)$ \textcolor{red}{independent}, considering $x$ as the result drawn from the uniform law in $(0, 1)$, sample size $n = \left\lbrace 25, 49, 121 \right\rbrace$ and nominal number of looks $\mathcal{L}=  8$ (to characterize single-look and multi-look, which are often used in SAR images).
+As a parametric setting for $(\text{roughness},~\text{intercept},~\text{slope})=(\alpha,\beta_0,\beta_1)$ we extracted the following parameters from an AIRSAR image:
+for city scenes, $\left\lbrace \alpha, \beta_0, \beta_{1}\right\rbrace = \left\lbrace -3.5, 1.1, 1.5\right\rbrace$, and $\left\lbrace \alpha, \beta_0, \beta_{1}\right\rbrace = \left\lbrace -3.5, 1.7, 1.5\right\rbrace$.
+</div>
+
+
+
+```{r setup, include=FALSE}
+#<h4> - Setting it globally the first code chunk of document, this is chunk output.  </h4>
+knitr::opts_chunk$set(fig.width = 8, collapse = TRUE)
+```
+
+
+## Packages
+```{r, message=FALSE, include=TRUE}
+library(maxLik)  
+library(compiler)
+library(invgamma)
+library(knitr)
+library(rootSolve)
+library(DT)
+```
+
+
+
+
+## Simulated data
+
+
+### RNG of distribution $\mathcal{G}_{I}^{0}$
+```{r, message=FALSE, include=TRUE}
+RNG.G0I <- function(n, theta)
+  rgamma(n, shape=theta[3], rate=theta[3]) * rinvgamma(n, shape=-theta[1], rate = theta[2])  
+```
+
+### RNG of Regression Model
+```{r, message=FALSE, include=TRUE}
+RNG.Reg <- function(X, theta){
+P     <- length(theta)
+n     <- dim(X)[1]  
+alpha <- theta[1]
+beta  <- theta[2:(P-1)]
+mu    <- exp(crossprod(t(X), beta))
+L     <- theta[4]
+
+ vect <- NULL
+ for(i in 1:n)
+    vect[i] <- RNG.G0I(n=1, c(alpha, -(alpha + 1)*mu[i], L))
+ vect
+}
+```
+
+
+### Simulated data
+```{r, message=FALSE, include=TRUE}
+Data <- function(n, theta, Dist=c("G0I", "Unif")){
+         Dist <- match.arg(Dist)
+           if(Dist == "G0I") X <- cbind(RNG.G0I(n, c(theta[1], -(theta[1] + 1), theta[4])))
+           else X <- cbind(1, runif(n))
+      Data <- cbind(y=RNG.Reg(X=X, theta=theta), X=X)
+  return(Data)
+}
+```
+
+
+
+
+
+
+## Maximun Likelihood Estimation -- MLEs
+
+
+### Likelihood function
+```{r, message=FALSE, include=TRUE}
+LikeF <- function(X, Y, L, g = function(x) log(x), ginv = function(x) exp(x)){
+  ll <- function(par){
+    P     <- length(par)
+    alpha <- par[1]
+    beta  <- par[2:P]
+    Eta   <- crossprod(t(X), beta)
+
+     dG0I <- lgamma(L-alpha) - alpha * log(-alpha-1) - 
+             alpha * mean(log(ginv(Eta))) - 
+             lgamma(-alpha) + (alpha-L) * mean(log((-alpha-1)*ginv(Eta) + L*Y))
+      return(dG0I)
+  } 
+  return(ll)
+}
+```
+
+
+### Gradient function
+```{r, message=FALSE, include=TRUE}
+GradF <- function(X, Y, L){
+    Grad <- function(par){
+      P     <- length(par)
+      n     <- length(X)
+      GradV <- numeric(P)
+      alpha <- par[1]
+      beta  <- par[2:P]
+      
+      ## auxiliary functions
+      mu    <- exp(crossprod(t(X), beta))
+      Gamma <- -mu*(alpha+1)
+      C1    <- -(L-alpha)*(alpha+1)
+      Tt    <- Gamma + L*Y
+      TAUa  <- -C1/Tt
+      mua   <- 1/mu
+      E     <- diag(c(mu))
+      aux   <- (TAUa - mua)
+      
+      const      <- -digamma(L-alpha) + digamma(-alpha) - log(-alpha-1) - alpha/(alpha+1)
+      GradV[1]   <- n*const + sum(log(Tt/mu)) - (alpha-L)*sum(mu/Tt)
+      GradV[2:3] <- alpha*(crossprod(X,E)%*%aux)
+      return(GradV)
+      }
+    return(Grad)
+}
+```
+
+### Hessians function
+```{r, message=FALSE, include=TRUE}
+HessF <- function(X, Y, L){
+  hess <- function(par){
+    P     <- length(par)
+    n     <- length(X)
+    hessV <- matrix(0, nrow=P, ncol=P)
+    alpha <- par[1]
+    beta  <- par[2:P]
+    
+    ## auxiliary functions
+    mu    <- exp(crossprod(t(X), beta))
+    Gamma <- -mu*(alpha+1)
+    Tt    <- Gamma + L*Y
+    mut   <- mu/Tt
+    E     <- diag(c(mu))
+    C1    <- -(L-alpha)*(alpha+1)
+    const <- psigamma(L-alpha, deriv=1) - 
+             psigamma(-alpha, deriv=1) - (alpha+2)/(alpha+1)^2
+    M     <- diag(c(1/mu + 1/Tt*(2*alpha - L + 1 + mut*C1)))
+    A     <- crossprod(X, E)%*%M 
+    q1    <- 1/mu^2 - C1*(alpha+1)/(alpha*Tt^2) 
+    q2    <- (1/mu + C1/(alpha*Tt))*(-1/mu)
+    Q     <- diag(c((q1 + q2)*mu^2))
+    B     <- alpha*(crossprod(X, Q)%*%X)
+      
+    hessV[1, 1] <- n*const + sum(mut*(2 + (alpha-L)*mut))
+    hessV[1, 2] <- A[1]
+    hessV[1, 3] <- A[2]
+    hessV[2, 1] <- A[1]
+    hessV[2, 2] <- B[1, 1]
+    hessV[2, 3] <- B[1, 2]
+    hessV[3, 1] <- A[2]
+    hessV[3, 2] <- B[2, 1]
+    hessV[3, 3] <- B[2, 2]
+    return(hessV)
+  }
+  return(hess)
+}
+```
+
+
+### Initial guess of $\alpha$, $\beta_0$, and $\beta_1$
+```{r, , message=FALSE, include=TRUE}
+Iguess <- function(X, Y, L){
+  beta <- solve(t(X)%*%X)%*%t(X)%*%log(Y)
+  Eta  <- crossprod(t(X), beta)
+
+  func <- function(x) sapply(x, 
+                         function(x) 
+                           psigamma(-x) - psigamma(L-x) + x/(-x-1) - log(-x-1) + 
+                           mean( log( (-x-1) + L * exp( log(Y) - Eta )  ) ) -
+                           (x-L) * mean( 1/( (-x-1) + L * exp( log(Y) - Eta )  )  ))
+  
+  LogLik <- function(x) lgamma(L-x) - x * log(-x-1) - lgamma(-x) + 
+    (x-L) * mean( log( (-x-1) + L * exp( log(Y) - Eta ) ) )
+  
+  ## 1 - Initial guess
+  root <- uniroot.all(func, c(-150, -1))
+  aux  <- order(LogLik(root))
+  
+  if(is.na(root[max(aux)])) IGa = -1.2
+  else IGa <- root[max(aux)]
+  
+  return(c(IGa, beta))
+}
+```
+
+### MLEs for $\alpha$, $\beta_0$, and $\beta_1$
+```{r, message=FALSE, include=TRUE}
+Reg.est <- function(Data, L, ME){
+  Y  <- Data[,1]
+  X  <- Data[,2:3]
+  IG <- Iguess(X, Y, L)
+  
+  ### Estimate the parameters
+  fn  <- LikeF(X, Y, L)
+  fg  <- GradF(X, Y, L)
+  fh  <- HessF(X, Y, L)
+  Est <- maxLik(logLik=fn, method=ME, start=IG)
+  return(Est)
+}
+```
+
+
+
+
+
+##  Cox and Snell correction, first case
+
+
+### Inverse matrix $\textbf{K}^{-1}(\boldsymbol{\theta})$
+```{r, , message=FALSE, include=TRUE}
+KThetaInv <- function(Data, n, Est){
+  P     <- dim(Data)[2] 
+  alpha <- Est[1]
+  beta  <- Est[2:P]
+  L     <- Est[4]
+  
+  ## Model
+  X   <- Data[,2:P]
+  mu  <- exp(crossprod(t(X), beta))
+
+  ## Derivatives
+  U11 <- psigamma(L-alpha, 1) - psigamma(-alpha, 1) - 
+         ((1/(alpha+1)) * (1 + 1/(alpha+1)))
+  
+  ## Constants -- C
+  C2A1 <- (alpha*(2*alpha+1-L)) / ((-alpha-1)*(alpha-L))
+  C2A2 <- (alpha*(alpha-1)) / ((-alpha-1)*(L-alpha+1))
+  C2   <- -(C2A1 + C2A2 + 1)  
+  
+  C3A1 <- (2*alpha) / ((-alpha-1)*(L-alpha)) 
+  C3A2 <- (alpha*(alpha-1)) / ((-alpha-1)^2*(L-alpha+1)) 
+  C3   <- U11 + C3A1 + C3A2  
+  
+  C4A1 <- (alpha-L)*psigamma(L-alpha, 2)
+  C4   <-  C4A1 - psigamma(L-alpha, 1) - psigamma(L, 1) + 1/L 
+    
+  ## Auxiliary variables 
+  E    <- diag(rep(mu, 1))
+  mua  <- 1/(mu)
+  Maux <- L/(L-alpha+1)
+  M    <- diag(Maux, n, n)
+
+  aux1 <- solve(t(X)%*%M%*%X)                            
+  aux2 <- t(X)%*%E%*%mua                               
+  
+  ## Inverse Matrix of the K(theta)
+  Eps   <- (C2/alpha)*aux1%*%aux2                      
+  Vart  <- n*C3 - C2*t(aux2)%*%Eps
+
+  KTinv <- matrix(numeric(0), nrow=4, ncol=4)
+  KA1   <- (aux1/alpha) + Eps%*%solve(Vart)%*%t(Eps)
+  KA2   <- -Eps%*%solve(Vart)
+  KA3   <- -solve(Vart)%*%t(Eps)
+  KA4   <- solve(Vart)
+  
+  KD    <- 1/(n*C4)
+  
+  KTinv[1,1] <- KA1[1, 1]
+  KTinv[1,2] <- KA1[1, 2]
+  KTinv[2,1] <- KA1[2, 1]
+  KTinv[2,2] <- KA1[2, 2]
+  KTinv[1,3] <- KA2[1, 1]
+  KTinv[2,3] <- KA2[2, 1]
+  KTinv[3,1] <- KA3[1, 1]
+  KTinv[3,2] <- KA3[1, 2]
+  KTinv[3,3] <- KA4[1, 1]
+  KTinv[1,4] <- 0
+  KTinv[2,4] <- 0
+  KTinv[3,4] <- 0
+  KTinv[4,1] <- 0
+  KTinv[4,2] <- 0
+  KTinv[4,3] <- 0
+  KTinv[4,4] <- KD
+  return(list(KT=KTinv))
+}
+```
+
+
+###  Bias correction
+```{r, , message=FALSE, include=TRUE}
+BiasCor1 <- function(Data, n, Est){
+  
+  # Inverse Matrix Ktheta and estimates
+  KTinv <- KThetaInv(Data, n, Est)
+  
+  # auxiliaries
+  P     <- dim(Data)[2] 
+  alpha <- Est[1]
+  beta  <- Est[2:(P+1)]
+  L     <- Est[4]
+  
+  ## Model
+  X   <- cbind(1, Data[,1])
+
+  ## Second Derivative of U1(\alpha, L) at Alpha
+  U12 <- -psigamma(L-alpha, 2) + psigamma(-alpha, 2) + 
+          (3 / (-alpha-1)^2) + ((2*alpha) / (-alpha-1)^3)
+
+  ## Constants
+  C1    <- (-alpha-1)*(L-alpha)
+
+  C5A1  <- ((-alpha+1)*(-alpha+2)) / ((-alpha+L+1)*(-alpha+L+2))
+  C5    <- C5A1-1
+
+  C6A1  <- (3*(alpha-1)) / ((-alpha+L+1))
+  C6    <- C6A1 + 3  
+
+  C7A1  <- (alpha*(alpha-1)*((-alpha-1)+2*(L-alpha))) / (C1*(-alpha+L+1))
+  C7A2  <- (2*alpha*(-alpha+1)*(-alpha+2)) / ((-alpha-1)*(-alpha+L+1)*(-alpha+L+2))
+  C7    <- 1- C7A1- C7A2
+
+  C8A1  <- (2*alpha*(alpha-1)) / ((-alpha-1)*(-alpha+L+1))
+  C8A2  <- (2*alpha*(2*alpha-L+1)) / C1 
+  C8    <- C8A1 - C8A2 + 2
+
+  C11A1 <- ((alpha-1)*(2*alpha+1-L)) / ((-alpha-1)*C1*(1+L-alpha)) 
+  C11A2 <- ((-alpha+1)*(-alpha+2)) / ((-alpha+L+1)*(-alpha+L+2)*(-alpha-1)^2)  
+  C11A3 <- 1 / C1
+  C11   <- -2*alpha*(C11A1 - C11A2  - C11A3)
+
+  C13A1 <- (3*alpha*(alpha-1)) / ((-alpha-1)*C1*(L-alpha+1)) 
+  C13A2 <- (2*alpha*(alpha-L)*(-alpha+1)*(-alpha+2)) / (C1*(L-alpha+1)*(L-alpha+2)*(-alpha-1)^2)  
+  C13   <- U12 - C13A1 + C13A2  
+
+  C16   <- -2*alpha*(L / (L-alpha+1))
+
+  C17   <- (L*(L+1)) / ((L-alpha+1)^2)
+
+  C19A1 <- (alpha*(2*alpha-L+1)) / ((-alpha-1)*(alpha-L)) 
+  C19A2 <- (alpha*(alpha-1)) / ((-alpha-1)*(1+L-alpha)) 
+  C19   <- C19A1 + C19A2 + 1 
+
+  C20A1 <- ((4*alpha+1-L)) / ((-alpha-1)*(alpha-L))  
+  C20A2 <- (alpha*(2*alpha+1-L)^2) / (((-alpha-1)*(alpha-L))^2) 
+  C20A3 <- ((2*alpha-1)) / ((-alpha-1)*(-alpha+L+1))  
+  C20A4 <- (alpha*(alpha-1)*(2*alpha-L)) / (((-alpha-1)*(-alpha+L+1))^2)  
+  C20   <- - C20A1 - C20A2 - C20A3 + C20A4  
+
+  C22A1 <- (2*alpha*(2*alpha+1-L))  / (C1^2)
+  C22A2 <- ((2*alpha-1)) / ((-alpha+L+1)*(-alpha-1)^2)  
+  C22A3 <- (alpha*(alpha-1)*((-alpha-1)+2*(L-alpha+1))) / ((1+L-alpha)^2*(-alpha-1)^3)  
+  C22   <- U12 + (2/C1) - C22A1 + C22A2 + C22A3
+
+  # Auxiliares
+  M1A1  <- 2*C16 - 2*alpha*C5
+  M1A2  <- 2*C16 + 2*alpha*C6
+  M2A1  <- 2*C19 - C7
+  M2A2  <- 2*C19 - C8
+  M3A1  <- (2*C17 - C7) - C8
+  M4A1  <- C11
+  M5A1  <- 2*C20 - C11
+  M6A1  <- 2*C22 - C13
+
+  # diagonal matrices
+  M1 <- diag(0.5*(M1A1+M1A2), n, n)
+  M2 <- diag(0.5*(M2A1+M2A2), n, n)
+  M3 <- diag(0.5*(M3A1), n, n)
+  M4 <- diag(-0.5*(M4A1), n, n)  
+  M5 <- diag(0.5*(M5A1), n , n)  
+  M6 <- diag(0.5*(M6A1), n, n) 
+
+  # Kappa and Delta BB
+  KappaBB <- cbind(KTinv$KT[1:2, 1:2])
+  DeltaBB <- diag(X%*%KappaBB%*%t(X))
+
+  # Kappa BA
+  KappaBA <- cbind(KTinv$KT[1:2, 3])
+  
+  # Kappa AA
+  KappaAA <- cbind(KTinv$KT[3, 3])
+  
+  # auxiliaries
+  T1 <- t(X)%*%M1%*%DeltaBB
+  T2 <- t(X)%*%(M2+M3)%*%X%*%KappaBA
+  T3 <- t(X)%*%diag(M5)%*%KappaAA
+  T4 <- sum(diag(M2%*%X%*%KappaBB%*%t(X)))
+  T5 <- KappaAA%*%sum(diag(M6))
+  T6 <- t(diag(M4+M5))%*%X%*%KappaBA
+
+  DeltaT1 <- T1+T2+T3
+  DeltaT2 <- T4+T5+T6
+
+  # Bias Correct
+  DeltaTiu <- cbind(c(DeltaT1, DeltaT2))
+  Ktheta   <- KTinv$KT[1:3, 1:3]
+  
+  BC <- Ktheta%*%DeltaTiu
+  return(c(BC[3], BC[2], BC[1]))
+}
+```
+
+
+
+
+
+
+
+##  Cox and Snell correction, second case
+
+
+### Auxiliary matrix $\widetilde{\textbf{X}}$
+```{r, , message=FALSE, include=TRUE}
+Xtiu <- function(Data, n){
+  Xaux   <- data.frame(Data[,-1], 0) 
+  colnames(Xaux) <- c('C1','C2','C3' )
+  
+  X1   <- cbind(0,0,1)
+  colnames(X1) <- c('C1','C2','C3' )
+  
+  x_til <- as.matrix(rbind(Xaux, X1))
+  return(x_til)
+}
+```
+
+### Auxiliary matrix $\widetilde{\textbf{W}}$
+```{r, , message=FALSE, include=TRUE}
+Wtiu <- function(Data, n, Est){
+  
+  n     <- dim(Data)[1]
+  P     <- dim(Data)[2] 
+  alpha <- Est[1]
+  beta  <- Est[2:P]
+  L     <- Est[4]
+  
+  ## Model
+  X   <- Data[,2:P]
+  mu  <- exp(crossprod(t(X), beta))
+  
+  ## Constants -- C
+  U11 <- psigamma(L-alpha, 1) - psigamma(-alpha, 1) - 
+    ((1/(alpha+1)) * (1 + 1/(alpha+1)))
+  
+  C2A1 <- (alpha*(2*alpha+1-L)) / ((-alpha-1)*(alpha-L))
+  C2A2 <- (alpha*(alpha-1)) / ((-alpha-1)*(L-alpha+1))
+  C2   <- -(C2A1 + C2A2 + 1)  #ok
+  
+  C3A1 <- (2*alpha) / ((-alpha-1)*(L-alpha)) 
+  C3A2 <- (alpha*(alpha-1)) / (((-alpha-1)^2)*(L-alpha+1)) 
+  C3   <- U11 + C3A1 + C3A2  #ok
+  
+  ## Auxiliary variables 
+  E    <- diag(c(mu))
+  MUa  <- 1/(mu)
+  Maux <- L/(L-alpha+1)
+  M    <- diag(Maux, n, n)
+  aux2 <- E%*%MUa
+  
+  #Matriz W~ 
+  #W_til <- matrix(numeric(0), nrow=3, ncol=3)
+  W1 <- alpha*M 
+  W2 <- C2*aux2     
+  W3 <- t(C2*aux2)  
+  W4 <- n*C3
+  
+  W11 <- cbind(W1, W2)
+  W22 <- cbind(W3, W4)
+  
+  W_tiu <- rbind(W11,W22)
+  
+  return(W_tiu)
+}
+```
+
+
+### Fisher information matrix $\textbf{K}(\boldsymbol{\theta})$
+```{r, , message=FALSE, include=TRUE}
+IFisher <- function(Data, n, Est){
+   A <- Xtiu(Data, n)
+   B <- Wtiu(Data, n, Est)
+  
+   Ifisher <- t(A)%*%B%*%A
+   
+ return(IFisher)
+}
+```
+
+### Auxiliary function $\widetilde{\boldsymbol{\Delta}}$
+```{r, , message=FALSE, include=TRUE}
+DeltaTil <- function(Data, n, Est){
+  
+  n     <- dim(Data)[1]
+  P     <- dim(Data)[2]
+  alpha <- Est[1]
+  beta  <- Est[2:P]
+  L     <- Est[4]
+  
+  # Inverse Matrix Ktheta and estimates
+  xtiu <- Xtiu(Data, n)
+  wtil <- Wtiu(Data, n, Est)
+  Invf <- solve(t(xtiu)%*%wtil%*%xtiu)
+  
+  ## Model
+  X   <- Data[,2:P]
+ 
+  ## Second Derivative of U1(\alpha, L) at Alpha
+  U12 <- -psigamma(L-alpha, 2) + psigamma(-alpha, 2) + 
+    (1/(-alpha-1)^2)*(1 - (2/(-alpha-1)))
+  
+  ## Constants
+  C1    <- (-alpha-1)*(L-alpha)
+  
+  C5A1  <- (2*(-alpha+1)*(-alpha+2)) / ((-alpha+L+1)*(-alpha+L+2))
+  C5    <- C5A1-2
+  
+  C6A1  <- (3*(alpha-1)) / (-alpha+L+1)
+  C6    <- C6A1+3 
+  
+  C7A1  <- (alpha*(alpha-1)*((-alpha-1)+2*(L-alpha))) / (C1*(-alpha+L+1))
+  C7A2  <- (2*alpha*(-alpha+1)*(-alpha+2)) / ((-alpha-1)*(-alpha+L+1)*(-alpha+L+2))
+  C7    <- 1- C7A1- C7A2 
+  
+  C8A1  <- (alpha*(2*alpha-L+1)) / C1 
+  C8A2  <- (alpha*(alpha-1)) / ((-alpha-1)*(-alpha+L+1))
+  C8    <- C8A1 - C8A2 -1 
+  
+  C9A1 <- ((alpha-1)*(2*alpha+1-L)) / ((-alpha-1)*C1*(1+L-alpha)) 
+  C9A2 <- ((-alpha+1)*(-alpha+2)) / ((-alpha+L+1)*(-alpha+L+2)*(-alpha-1)^2)  
+  C9A3 <- 1 / C1
+  C9   <- -2*alpha*(C9A1 - C9A2  - C9A3) 
+  
+  C10A1 <- (3*alpha*(alpha-1)) / ((-alpha-1)*C1*(L-alpha+1)) 
+  C10A2 <- (2*alpha*(-alpha+1)*(-alpha+2)) / ((L-alpha+1)*(L-alpha+2)*(-alpha-1)^3)  
+  C10   <- U12 - C10A1 - C10A2  
+  
+  C11   <- -2*alpha*(L / (L-alpha+1)) 
+  
+  C12   <- (L*(L+1)) / ((L-alpha+1)^2)
+  
+  C13A1 <- (alpha*(2*alpha-L+1)) / ((-alpha-1)*(alpha-L)) 
+  C13A2 <- (alpha*(alpha-1)) / ((-alpha-1)*(1+L-alpha)) 
+  C13   <- C13A1 + C13A2 + 1 
+  
+  C14A1 <- ((4*alpha+1-L)) / ((-alpha-1)*(alpha-L))  
+  C14A2 <- (alpha*(2*alpha+1-L)^2) / (((-alpha-1)*(alpha-L))^2) 
+  C14A3 <- ((2*alpha-1)) / ((-alpha-1)*(-alpha+L+1))  
+  C14A4 <- (alpha*(alpha-1)*(2*alpha-L)) / (((-alpha-1)*(-alpha+L+1))^2)  
+  C14   <- - C14A1 - C14A2 - C14A3 + C14A4  
+  
+  C15A1 <- (2*alpha*(2*alpha+1-L))  / (C1^2)
+  C15A2 <- ((2*alpha-1)) / ((-alpha+L+1)*(-alpha-1)^2)  
+  C15A3 <- (alpha*(alpha-1)*((-alpha-1)+2*(L-alpha+1))) / (((1+L-alpha)^2)*(-alpha-1)^3)  
+  C15   <- U12 + (2/C1) - C15A1 + C15A2 + C15A3 
+  
+  # Auxiliares
+  M1A1 <- 2*C11 - alpha*C5
+  M1A2 <- 2*C11 + alpha*C6
+  M2A1 <- 2*C13 - C7
+  M2A2 <- 2*C13 + C8
+  M3A1 <- (2*C12 - C7) - C8
+  M4A1 <- -C9
+  M5A1 <- 2*C14 - C9
+  M6A1 <- 2*C15 - C10
+  
+  # diagonal matrices
+  M1 <- diag(0.5*(M1A1-M1A2), n, n)  
+  M2 <- diag(0.5*(M2A1-M2A2), n, n)
+  M3 <- diag(0.5*(M3A1), n, n)
+  M4 <- diag(0.5*(M4A1), n, n)  
+  M5 <- diag(0.5*(M5A1), n , n)  
+  M6 <- diag(0.5*(M6A1), n, n) 
+  
+  # Kappa and Delta BB
+  KappaBB <- cbind(Invf[1:2, 1:2])
+  DeltaBB <- diag(X%*%KappaBB%*%t(X))
+  
+  # Kappa BA
+  KappaBA <- cbind(Invf[1:2, 3])
+  
+  # Kappa AA
+  KappaAA <- cbind(Invf[3, 3])
+  
+  # auxiliaries
+  T1 <- M1%*%DeltaBB
+  T2 <- (M2+M3)%*%X%*%KappaBA
+  T3 <- diag(M5)%*%KappaAA
+  
+  T4 <- sum(diag(M2%*%X%*%KappaBB%*%t(X)))
+  T5 <- KappaAA%*%sum(diag(M6))
+  T6 <- t(diag(M4+M5))%*%X%*%KappaBA
+  
+  DeltaT1 <- T1+T2+T3
+  DeltaT2 <- T4+T5+T6
+  
+  deltatiu <- cbind(c(DeltaT1, DeltaT2))
+
+  return(deltatiu)
+}
+```
+
+
+### Bias correction 
+```{r, , message=FALSE, include=TRUE}
+BiasCor2 <- function(Data, n, Est){
+  
+  xtiu <- Xtiu(Data, n)
+  wtil <- Wtiu(Data, n, Est)
+  
+  # Inverse Matrix Ktheta and estimates
+     Invf <- solve(t(xtiu)%*%wtil%*%xtiu)
+   deltil <- DeltaTil(Data, n, Est)
+   epstil <- solve(wtil)%*%deltil
+   
+      bc <- Invf%*%(t(xtiu)%*%wtil%*%epstil)
+
+   return(c(bc[3], bc[1], bc[2]))
+}
+```
+
+
+
+
+##  Monte Carlo experiments 
+```{r, , message=FALSE, include=TRUE}
+MC.SIM <- function(NREP, theta, Dist){
+  Res   <- NULL
+  Vsamp <- c(25, 49, 121)
+  enableJIT(3) 
+  for(j in 1:length(Vsamp)){
+    EstNC <- NULL
+    EstC  <- NULL
+    for(i in 1:NREP){
+      Data <- Data(Vsamp[j], theta, Dist)
+      regZ <- summary(Reg.est(Data, L=theta[4], ME="SANN"))
+
+       ## Bias Correction
+      if(returnCode(regZ) == 0){
+        BiasCS1 <- BiasCor1(Data = Data, n=dim(Data)[1], Est=c(regZ$estimate[,1], theta[4]))
+        BiasCS2 <- BiasCor2(Data = Data, n=dim(Data)[1], Est=c(regZ$estimate[,1], theta[4]))
+        
+        BCS1 <- regZ$estimate[,1] - BiasCS1/Vsamp[j]
+        BCS2 <- regZ$estimate[,1] - BiasCS2/Vsamp[j]
+        
+        if(BCS1[1] <= BCS2[1] & BCS1[2] <= BCS2[2] & BCS1[3] <= BCS2[3]) estc <- BCS1
+        else estc <- BCS2
+      } else estc <- c(rep(NA, 3))
+
+      # Statistics
+      EstNC <- rbind(EstNC, regZ$estimate[,1])
+      EstC  <- rbind(EstC, estc)
+    }
+
+   # Non-corrected
+   MestNC <- colMeans(EstNC, na.rm = TRUE)
+   BiasNC <- MestNC - theta[1:3]
+   
+   # Corrected 
+   MestC <- colMeans(EstC, na.rm = TRUE)
+   BiasC <- MestC - theta[1:3]
+   
+   aux  <- cbind(Sample=Vsamp[j], Mean=MestNC, Bias=BiasNC, Mean.Cor=MestC, Bias.Cor = BiasC)
+   Res  <- rbind(Res, aux)
+  }
+  return(round(Res, 6))
+}
+```
+
+###  Numerical analysis of artificial 
+####  Experiment with 1000 repetitions, first scenario
+```{r, warning = FALSE, message=TRUE, include=TRUE}
+set.seed(241011)
+RES <- MC.SIM(NREP=1000, theta=c(-3.5, 1.1, 1.5, 8), Dist = "Unif")      
+
+DT::datatable(RES, options=list(pageLength = 3, dom = 'tip'), class='cell-border stripe',  caption = 'Table 1:  MLEs and their corrected versions.', colnames = c("Parameter", "Sample", "Estimate", "Bias", "Est.corrected", "Bias.corrected"), rownames = c("\u03b1", "\u03B2\u2080", "\u03B2\u2081"))
+```
+
+####  Experiment with 1000 repetitions, second scenario
+```{r, warning = FALSE, message=TRUE, include=TRUE}
+set.seed(241011)
+RES <- MC.SIM(NREP=1000, theta=c(-3.5, 1.7, 1.5, 8), Dist = "Unif")      
+
+DT::datatable(RES, options=list(pageLength = 3, dom = 'tip'), class='cell-border stripe',  caption = 'Table 1:  MLEs and their corrected versions.', colnames = c("Parameter", "Sample", "Estimate", "Bias", "Est.corrected", "Bias.corrected"), rownames = c("\u03b1", "\u03B2\u2080", "\u03B2\u2081"))
+```
+
+
+
+
+##  Concluding remarks
+
+<br/>
+<div style='text-align: justify;'>
+The aim of this post is to briefly illustrate the synthetic study what was covered in the paper **M. F. S. S. Sousa, J. M. Vasconcelos and A. D. C.
+Nascimento, 20XX. Bias-corrected estimation for $\mathcal{G}^0_{I}$ regression with applications. Vol. XX. XXXXXXXXXXXXXXXXXXXXXXX.**
+</div>
+
+
