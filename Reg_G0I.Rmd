@@ -122,9 +122,7 @@ LikeF <- function(X, Y, L, g = function(x) log(x), ginv = function(x) exp(x)){
     beta  <- par[2:P]
     Eta   <- crossprod(t(X), beta)
 
-    aux <- -(alpha+1)*ginv(Eta) + L*Y
-    #if(is.na(mean(log(aux))) || is.infinite(mean(log(aux)))){
-     #aux <- 1e-10  
+     aux <- -(alpha+1)*ginv(Eta) + L*Y
      if(alpha < -1){
       dG0I <- lgamma(L-alpha) - alpha * log(-alpha-1) - 
              alpha * mean(log(ginv(Eta)), na.rm=TRUE) - 
