@@ -3,7 +3,7 @@ title: <img src="https://www.ncti.com.br/wp-content/uploads/2014/02/UFPE.png" al
 author: '**Authors**: M. Sousa <br/>                  $~~~~~~~~~~~~~~$ A. Nascimento <br/> 
      $~~~~~~~~~~~~~~$ J. Vasconcelos <br/> 
          **Correspondence Email**: josimar.vasconcelos@ufrpe.br'
-date: "Update date: 2024-10-11"
+date: "Update date: 2025-01-30"
 header-includes:
 - \usepackage{amsthm, amssymb}
 - \usepackage{color, xcolor}
@@ -112,10 +112,15 @@ LikeF <- function(X, Y, L, g = function(x) log(x), ginv = function(x) exp(x)){
     beta  <- par[2:P]
     Eta   <- crossprod(t(X), beta)
 
-     dG0I <- lgamma(L-alpha) - alpha * log(-alpha-1) - 
-             alpha * mean(log(ginv(Eta))) - 
-             lgamma(-alpha) + (alpha-L) * mean(log((-alpha-1)*ginv(Eta) + L*Y))
+    aux <- -(alpha+1)*ginv(Eta) + L*Y
+    #if(is.na(mean(log(aux))) || is.infinite(mean(log(aux)))){
+     #aux <- 1e-10  
+     if(alpha < -1){
+      dG0I <- lgamma(L-alpha) - alpha * log(-alpha-1) - 
+             alpha * mean(log(ginv(Eta)), na.rm=TRUE) - 
+             lgamma(-alpha) + (alpha-L) * mean(log(aux), na.rm=TRUE)
       return(dG0I)
+    } else return(dG0I <- NA)
   } 
   return(ll)
 }
@@ -300,12 +305,8 @@ KThetaInv <- function(Data, n, Est){
   KTinv[3,1] <- KA3[1, 1]
   KTinv[3,2] <- KA3[1, 2]
   KTinv[3,3] <- KA4[1, 1]
-  KTinv[1,4] <- 0
-  KTinv[2,4] <- 0
-  KTinv[3,4] <- 0
-  KTinv[4,1] <- 0
-  KTinv[4,2] <- 0
-  KTinv[4,3] <- 0
+  KTinv[1:3,4] <- c(0, 0, 0)
+  KTinv[4,1:3] <- c(0, 0, 0)
   KTinv[4,4] <- KD
   return(list(KT=KTinv))
 }
@@ -692,7 +693,7 @@ MC.SIM <- function(NREP, theta, Dist){
 
 ###  Numerical analysis of artificial 
 ####  Experiment with 1000 repetitions, first scenario
-```{r, warning = FALSE, message=TRUE, include=TRUE}
+```{r, warning=FALSE, message=TRUE, include=TRUE}
 set.seed(241011)
 RES <- MC.SIM(NREP=1000, theta=c(-3.5, 1.1, 1.5, 8), Dist = "Unif")      
 
@@ -700,9 +701,9 @@ DT::datatable(RES, options=list(pageLength = 3, dom = 'tip'), class='cell-border
 ```
 
 ####  Experiment with 1000 repetitions, second scenario
-```{r, warning = FALSE, message=TRUE, include=TRUE}
+```{r, warning=FALSE, message=TRUE, include=TRUE}
 set.seed(241011)
-RES <- MC.SIM(NREP=1000, theta=c(-3.5, 1.7, 1.5, 8), Dist = "Unif")      
+RES <- MC.SIM(NREP=1000, theta=c(-3.5, 1.7, 4.5, 8), Dist = "Unif")      
 
 DT::datatable(RES, options=list(pageLength = 3, dom = 'tip'), class='cell-border stripe',  caption = 'Table 1:  MLEs and their corrected versions.', colnames = c("Parameter", "Sample", "Estimate", "Bias", "Est.corrected", "Bias.corrected"), rownames = c("\u03b1", "\u03B2\u2080", "\u03B2\u2081"))
 ```
