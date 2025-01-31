@@ -3,7 +3,7 @@ title: <img src="https://www.ncti.com.br/wp-content/uploads/2014/02/UFPE.png" al
 author: '**Authors**: M. Sousa <br/>                  $~~~~~~~~~~~~~~$ A. Nascimento <br/> 
      $~~~~~~~~~~~~~~$ J. Vasconcelos <br/> 
          **Correspondence Email**: josimar.vasconcelos@ufrpe.br'
-date: "Update date: 2025-01-30"
+date: "Update date: 2025-01-31"
 header-includes:
 - \usepackage{amsthm, amssymb}
 - \usepackage{color, xcolor}
@@ -43,8 +43,18 @@ for city scenes, $\left\lbrace \alpha, \beta_0, \beta_{1}\right\rbrace = \left\l
 knitr::opts_chunk$set(fig.width = 8, collapse = TRUE)
 ```
 
+## Install Packages
+```{r, message=FALSE, include=TRUE}
+#install.packages("maxLik")  
+#install.packages("compiler")
+#install.packages("invgamma")
+#install.packages("knitr")
+#install.packages("rootSolve")
+#install.packages("DT")
+```
 
-## Packages
+
+## Import Packages
 ```{r, message=FALSE, include=TRUE}
 library(maxLik)  
 library(compiler)
