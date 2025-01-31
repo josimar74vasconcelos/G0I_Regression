@@ -2,4 +2,4 @@
 
 Bias-corrected estimation for the GI0 regression
 
-Update code: 2025.01.31
+Update code: 2025.01.31.
